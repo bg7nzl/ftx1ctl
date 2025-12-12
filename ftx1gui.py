@@ -334,25 +334,52 @@ class MeterHeader(ttk.Frame):
 
     def _calc_ticks(self):
         """
-        对有转换的 meter:
-           raw=0,128,255 -> 转换公式
-        无转换的:
-           直接显示 0, 0.5, 1
+        对刻度的显示做“物理量 + 单位”的直观化：
+
+        - S 表：按 S 表盘（S0..S9 / +dB）
+        - COMP：0..+30 dB（线性）
+        - ALC：0..200 %
+        - PO：W
+        - SWR：无单位
+        - IDD：A
+        - VDD：V
         """
         # S 表（S_MAIN/S_SUB）：显示更直观的刻度
         if self.meter_id in (1, 2):
-            # raw=0   -> S0
-            # raw=128 -> S9
-            # raw=255 -> +60dB
             ticks = []
             for raw in (0, 128, 255):
                 t = s_meter_text_from_raw(raw)
-                # 刻度行更紧凑一点：去掉末尾 dB / 小数
                 if t.startswith("+"):
-                    t = t.replace("dB", "")
-                    t = t.replace(".0", "")
+                    t = t.replace("dB", "").replace(".0", "")
                 ticks.append(t)
             return ticks
+
+        # COMP：线性 0..+30 dB
+        if self.meter_id == 3:
+            return ["0dB", "+15dB", "+30dB"]
+
+        # ALC：0..200 %
+        if self.meter_id == 4:
+            return ["0%", "100%", "200%"]
+
+        if not self.use_convert:
+            return ["0", "0.5", "1"]
+
+        ticks = []
+        for raw in (0, 128, 255):
+            val = convert_meter_value(self.meter_id, raw)
+            if math.isinf(val):
+                ticks.append("∞")
+            else:
+                if self.meter_id == 5:      # PO
+                    ticks.append(f"{val:.1f}W")
+                elif self.meter_id == 7:    # IDD
+                    ticks.append(f"{val:.2f}A")
+                elif self.meter_id == 8:    # VDD
+                    ticks.append(f"{val:.1f}V")
+                else:                       # SWR 等
+                    ticks.append(f"{val:.2f}")
+        return ticks
 
         if not self.use_convert:
             return ["0", "0.5", "1"]
@@ -456,10 +483,26 @@ class MeterHeader(ttk.Frame):
             self.bar_canvas.coords(self.bar_id, 0, 0, 80, 12)
             return
 
-        # 文本显示：S 表显示 "Sx" 或 "+XdB"；其余 meter 仍用数字
+        # 文本显示：按单位格式化
         if self.meter_id in (1, 2):
             self.value_var.set(s_meter_text_from_raw(int(raw)))
+        elif self.meter_id == 3:
+            # COMP：+xdB
+            self.value_var.set(f"+{value:.0f}dB")
+        elif self.meter_id == 4:
+            # ALC：0..200%
+            self.value_var.set(f"{value:.0f}%")
+        elif self.meter_id == 5:
+            # PO：W
+            self.value_var.set(f"{value:.1f}W")
+        elif self.meter_id == 7:
+            # IDD：A
+            self.value_var.set(f"{value:.2f}A")
+        elif self.meter_id == 8:
+            # VDD：V
+            self.value_var.set(f"{value:.1f}V")
         else:
+            # SWR：无单位
             if abs(value) >= 10:
                 self.value_var.set(f"{value:.1f}")
             else:
@@ -1000,7 +1043,7 @@ class FTX1TkApp:
         layout_meters = [
             # S 表使用非线性转换（raw -> S0/1/3/5/7/9 或 +dB）
             ("S_MAIN", 1, True, True, 128),
-            ("COMP", 3, False, True, 128),
+            ("COMP", 3, True, False, 15),
             ("ALC", 4, True, False, 100),
             ("PO", 5, True, False, 10),
             ("SWR", 6, True, False, 3),

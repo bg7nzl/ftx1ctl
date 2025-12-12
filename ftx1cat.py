@@ -42,9 +42,18 @@ def idd_from_meter(rm):
     scale = 3 / 255.0
     return rm * scale   
     
-def alc_from_meter(rm):
-    scale = 1 / 126
+
+
+def comp_db_from_meter(rm):
+    """Speech compressor meter: linear 0..+30 dB."""
+    scale = 30.0 / 255.0
     return rm * scale
+def alc_from_meter(rm):
+    """ALC meter as percentage: 0..200%."""
+    # Historically this was ~0..2.0; we now express it as 0..200%.
+    scale = 200.0 / 252.0
+    v = rm * scale
+    return 200.0 if v > 200.0 else v
 
 def po_from_meter(x: float) -> float:
     points = [
@@ -179,12 +188,12 @@ def s_meter_text_from_raw(raw: int) -> str:
 METER_CONVERT = {
     1: s_meter_from_raw,   # S_MAIN (float: <10 => S, >=10 => dB)
     2: s_meter_from_raw,   # S_SUB  (float: <10 => S, >=10 => dB)
-    4: alc_from_meter,   # ALC
-    5: po_from_meter,    # PO
-    6: swr_from_meter,   # SWR
-    7: idd_from_meter,   # IDD
-    8: vdd_from_meter,   # VDD
-    # 1 S_MAIN, 2 S_SUB, 3 COMP 不转换，直接使用原始数值
+    3: comp_db_from_meter, # COMP (dB, linear 0..30)
+    4: alc_from_meter,     # ALC (%) 0..200
+    5: po_from_meter,      # PO (W)
+    6: swr_from_meter,     # SWR
+    7: idd_from_meter,     # IDD (A)
+    8: vdd_from_meter,     # VDD (V)
 }
 
 def convert_meter_value(meter_id: int, raw: int) -> float:
