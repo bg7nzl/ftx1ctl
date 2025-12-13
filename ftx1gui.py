@@ -662,7 +662,7 @@ class MicWaterfallPanel(ttk.Frame):
 
         # 默认启动第一个设备
         default_index = self.devices[0][0]
-        self.start_stream(default_index)
+        self.after(300, lambda: self.start_stream(default_index))
 
     def on_device_selected(self, event):
         sel = self.device_var.get()

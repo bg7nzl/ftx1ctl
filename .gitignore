@@ -211,3 +211,4 @@ ftx1gui.exe
 ftx1gui.build/
 ftx1gui.dist/
 ftx1gui.onefile-build/
+ftx1gui.exe.sig
