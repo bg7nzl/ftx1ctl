@@ -47,7 +47,7 @@ echo 3. 开始使用 Nuitka 打包...
 echo ================================
 :: Python 3.12 + Nuitka + MinGW64 (自动下载) = 稳定打包
 :: 增加了 --enable-plugin=tk-inter 和 numpy 支持
-python -m nuitka --mingw64 --lto=no --onefile --windows-console-mode=disable --enable-plugin=tk-inter --enable-plugin=numpy --include-package=sounddevice --remove-output ftx1gui.py
+python -m nuitka --mingw64 --onefile --windows-console-mode=disable --enable-plugin=tk-inter --enable-plugin=numpy --include-package=sounddevice ftx1gui.py
 
 echo ================================
 echo 打包完成！文件名为 ftx1gui.exe
