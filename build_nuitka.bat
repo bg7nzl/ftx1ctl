@@ -18,13 +18,13 @@ if errorlevel 1 (
 )
 
 echo 检测到 Python 3.12，正在创建专用打包环境...
-if exist venv_build rmdir /s /q venv_build
+if exist venv rmdir /s /q venv
 
 :: 使用 3.12 创建虚拟环境
-%PYTHON_CMD% -m venv venv_build
+%PYTHON_CMD% -m venv venv
 
 echo 正在激活虚拟环境...
-call venv_build\Scripts\activate.bat
+call venv\Scripts\activate.bat
 
 echo ================================
 echo 2. 正在安装依赖库...
