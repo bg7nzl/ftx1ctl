@@ -20,6 +20,18 @@ from ftx1cat import (
     s_meter_text_from_raw,
 )
 
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+from i18n import I18N_TEXT as I18N_TEXT
+
+DISPLAY_TEXT = I18N_TEXT["en"]
+
+def _T(key: str, default: str | None = None) -> str:
+    """Safe text lookup: avoid KeyError if a key is missing in DISPLAY_TEXT."""
+    if default is None:
+        default = key
+    return DISPLAY_TEXT.get(key, default)
 
 # ==========================
 # Hamlib net rigctl 服务器
@@ -69,10 +81,10 @@ class RigctlTCPServer(threading.Thread):
             sock.bind((self.host, self.port))
             sock.listen(5)
         except OSError as e:
-            print(f"[rigctl] 监听失败: {e}")
+            print(DISPLAY_TEXT["log_rigctl_listen_failed_fmt"].format(e=e))
             return
 
-        print(f"[rigctl] 监听 {self.host}:{self.port}")
+        print(DISPLAY_TEXT["log_rigctl_listen_fmt"].format(host=self.host, port=self.port))
 
         while not self._stop_event.is_set():
             try:
@@ -84,13 +96,13 @@ class RigctlTCPServer(threading.Thread):
             except OSError:
                 break
 
-            print(f"[rigctl] 客户端连接自 {addr}")
+            print(DISPLAY_TEXT["log_rigctl_client_fmt"].format(addr=addr))
             th = threading.Thread(
                 target=self.handle_client, args=(conn,), daemon=True
             )
             th.start()
 
-        print("[rigctl] 服务器退出")
+        print(DISPLAY_TEXT["log_rigctl_exit"])
 
     def handle_client(self, conn: socket.socket):
         with conn:
@@ -579,7 +591,8 @@ class MicWaterfallPanel(ttk.Frame):
         top_frame = ttk.Frame(self)
         top_frame.pack(side=tk.TOP, fill=tk.X)
 
-        ttk.Label(top_frame, text="输入设备:").pack(side=tk.LEFT, padx=5, pady=5)
+        self.lbl_input_device = ttk.Label(top_frame, text=_T("label_input_device"))
+        self.lbl_input_device.pack(side=tk.LEFT, padx=5, pady=5)
 
         self.device_var = tk.StringVar()
         self.device_combo = ttk.Combobox(
@@ -624,7 +637,7 @@ class MicWaterfallPanel(ttk.Frame):
         try:
             all_devices = sd.query_devices()
         except Exception as e:
-            print(f"查询音频设备失败: {e}")
+            print(_T("audio_devices_query_failed_fmt").format(e=e))
             self.devices = []
             return
 
@@ -635,7 +648,7 @@ class MicWaterfallPanel(ttk.Frame):
         ]
 
         if not self.devices:
-            self.device_combo["values"] = ["<无输入设备>"]
+            self.device_combo["values"] = [_T("no_input_device")]
             self.device_combo.current(0)
             return
 
@@ -700,7 +713,7 @@ class MicWaterfallPanel(ttk.Frame):
             )
             self.stream.start()
         except Exception as e:
-            print(f"Error starting stream on device {device_index}: {e}")
+            print(_T("audio_stream_start_failed_fmt", "Error starting stream on device {device}: {e}").format(device=device_index, e=e))
             self.stream = None
 
     # --------------------- 绘图 & 点击 ---------------------
@@ -805,7 +818,7 @@ class MicWaterfallPanel(ttk.Frame):
 
 
     def refresh_plot(self):
-        """强制刷新一次瀑布图（用于 Notch 红线立即更新）。"""
+        """ """
         try:
             self._update_plot()
         except Exception:
@@ -828,9 +841,12 @@ class MicWaterfallPanel(ttk.Frame):
 class FTX1TkApp:
     def __init__(self, master):
         self.master = master
-        self.master.title("FTX-1 控制台 by BG7NZL")
+        self.master.title(DISPLAY_TEXT["app_title"])
         self.cat = None  # type: FTX1Cat | None
         self.rigctl_server = None
+
+        # i18n language (default en)
+        self.current_lang = "en"
 
         # 默认 TCP 端口
         self.tcp_port_var = tk.IntVar(value=4532)
@@ -852,11 +868,138 @@ class FTX1TkApp:
         self.preamp_vars = {}  # band -> tk.StringVar
 
         self._build_gui()
+        # Apply initial language to all widgets
+        self.apply_language()
 
         # 启动定时刷新
         self._schedule_meter_update()
 
         self.master.protocol("WM_DELETE_WINDOW", self.on_close)
+
+
+    def on_language_changed(self, event=None):
+        lang = (self.lang_var.get() or "").strip()
+        if lang in I18N_TEXT:
+            self.current_lang = lang
+            self.apply_language()
+
+    def apply_language(self):
+        """Apply current language text to existing widgets (Tk does not auto-refresh)."""
+        global DISPLAY_TEXT
+        DISPLAY_TEXT = I18N_TEXT.get(self.current_lang, I18N_TEXT.get("zh", DISPLAY_TEXT))
+
+        # Window title
+        try:
+            self.master.title(_T("app_title"))
+        except Exception:
+            pass
+
+        # Top labels/buttons
+        for attr, key in [
+            ("lbl_cat_port", "label_cat_port"),
+            ("lbl_ptt_port", "label_ptt_port"),
+            ("lbl_baud1", "label_baud"),
+            ("lbl_baud2", "label_baud"),
+            ("lbl_rigctl_port", "label_rigctl_port"),
+        ]:
+            w = getattr(self, attr, None)
+            if w is not None:
+                try:
+                    w.configure(text=_T(key))
+                except Exception:
+                    pass
+
+        for attr, key in [
+            ("btn_connect", "btn_connect"),
+            ("btn_disconnect", "btn_disconnect"),
+            ("btn_full_read", "btn_full_read"),
+            ("btn_refresh_rts", "btn_refresh_rts"),
+            ("btn_set_notch", "btn_set"),
+            ("btn_read_notch", "menu_read"),
+        ]:
+            w = getattr(self, attr, None)
+            if w is not None:
+                try:
+                    w.configure(text=_T(key))
+                except Exception:
+                    pass
+
+        # Frames
+        for attr, key in [
+            ("freq_frame", "frame_freq_mode_ptt"),
+            ("preamp_frame", "frame_preamp"),
+            ("meter_frame", "frame_meters"),
+            ("notch_frame", "frame_notch_main"),
+        ]:
+            w = getattr(self, attr, None)
+            if w is not None:
+                try:
+                    w.configure(text=_T(key))
+                except Exception:
+                    pass
+
+        # Static labels
+        for attr, key in [
+            ("lbl_freq_static", "label_freq_static"),
+            ("lbl_mode_static", "label_mode_static"),
+            ("lbl_meter_rate", "label_meter_rate"),
+            ("lbl_notch_hint", "hint_fft_click_notch"),
+            ("lbl_notch_freq", "label_freq_hz"),
+            ("lbl_notch_current", "label_current"),
+            ("lbl_agc", "label_agc"),
+            ("lbl_power", "label_power_w"),
+        ]:
+            w = getattr(self, attr, None)
+            if w is not None:
+                try:
+                    w.configure(text=_T(key))
+                except Exception:
+                    pass
+
+        # Checkbuttons
+        if getattr(self, "rts_check", None) is not None:
+            try:
+                self.rts_check.configure(text=_T("label_rts_ptt"))
+            except Exception:
+                pass
+        if getattr(self, "chk_enable_notch", None) is not None:
+            try:
+                self.chk_enable_notch.configure(text=_T("chk_enable_notch"))
+            except Exception:
+                pass
+
+        # Status vars (best-effort refresh)
+        try:
+            if self.cat is None:
+                self.status_var.set(_T("status_disconnected"))
+            else:
+                self.status_var.set(
+                    _T("status_connected_fmt").format(
+                        port=self.port_entry.get(),
+                        baud=self.baud_entry.get(),
+                        port2=self.port2_entry.get(),
+                        baud2=self.baud2_entry.get(),
+                    )
+                )
+        except Exception:
+            pass
+
+        try:
+            if self.rigctl_server is None:
+                self.rigctl_status_var.set(_T("rigctl_stop"))
+            else:
+                self.rigctl_status_var.set(
+                    _T("rigctl_started_fmt").format(tcp_port=int(self.tcp_port_var.get()))
+                )
+        except Exception:
+            pass
+
+        # Waterfall panel label
+        if getattr(self, "waterfall_panel", None) is not None and hasattr(self.waterfall_panel, "lbl_input_device"):
+            try:
+                self.waterfall_panel.lbl_input_device.configure(text=_T("label_input_device"))
+            except Exception:
+                pass
 
     # ---------- GUI 搭建 ----------
 
@@ -866,143 +1009,173 @@ class FTX1TkApp:
         top.pack(side="top", fill="x")
 
         # 串口1: CAT
-        ttk.Label(top, text="CAT 串口:").pack(side="left")
+        self.lbl_cat_port = ttk.Label(top, text=_T("label_cat_port"))
+        self.lbl_cat_port.pack(side="left")
         self.port_entry = ttk.Entry(top, width=8)
         self.port_entry.insert(0, "COM11")
         self.port_entry.pack(side="left", padx=2)
 
-        ttk.Label(top, text="波特率:").pack(side="left")
+        self.lbl_baud1 = ttk.Label(top, text=_T("label_baud"))
+        self.lbl_baud1.pack(side="left")
         self.baud_entry = ttk.Entry(top, width=8)
         self.baud_entry.insert(0, "38400")
         self.baud_entry.pack(side="left", padx=4)
 
         # 串口2: PTT (RTS)
-        ttk.Label(top, text="PTT 串口:").pack(side="left", padx=(10, 2))
+        self.lbl_ptt_port = ttk.Label(top, text=_T("label_ptt_port"))
+        self.lbl_ptt_port.pack(side="left", padx=(10, 2))
         self.port2_entry = ttk.Entry(top, width=8)
         self.port2_entry.insert(0, "COM12")
         self.port2_entry.pack(side="left", padx=2)
 
-        ttk.Label(top, text="波特率:").pack(side="left")
+        self.lbl_baud2 = ttk.Label(top, text=_T("label_baud"))
+        self.lbl_baud2.pack(side="left")
         self.baud2_entry = ttk.Entry(top, width=8)
         self.baud2_entry.insert(0, "38400")
         self.baud2_entry.pack(side="left", padx=4)
 
-        self.btn_connect = ttk.Button(top, text="连接", command=self.on_connect)
+        self.btn_connect = ttk.Button(top, text=DISPLAY_TEXT["btn_connect"], command=self.on_connect)
         self.btn_connect.pack(side="left", padx=4)
 
-        self.btn_disconnect = ttk.Button(top, text="断开", command=self.on_disconnect, state="disabled")
+        self.btn_disconnect = ttk.Button(top, text=DISPLAY_TEXT["btn_disconnect"], command=self.on_disconnect, state="disabled")
         self.btn_disconnect.pack(side="left", padx=4)
 
-        self.btn_full_read = ttk.Button(top, text="全量读取", command=self.on_full_read, state="disabled")
+        self.btn_full_read = ttk.Button(top, text=DISPLAY_TEXT["btn_full_read"], command=self.on_full_read, state="disabled")
         self.btn_full_read.pack(side="left", padx=(12, 4))
 
-        ttk.Label(top, text="rigctl TCP端口:").pack(side="left", padx=(20, 2))
+        self.lbl_rigctl_port = ttk.Label(top, text=_T("label_rigctl_port"))
+        self.lbl_rigctl_port.pack(side="left", padx=(20, 2))
         self.port_tcp_entry = ttk.Entry(top, width=6, textvariable=self.tcp_port_var)
         self.port_tcp_entry.pack(side="left", padx=2)
 
-        self.rigctl_status_var = tk.StringVar(value="rigctl: 停止")
-        ttk.Label(top, textvariable=self.rigctl_status_var).pack(side="right")
+        self.rigctl_status_var = tk.StringVar(value=DISPLAY_TEXT["rigctl_stop"])
+        self.lbl_rigctl_status = ttk.Label(top, textvariable=self.rigctl_status_var)
+        self.lbl_rigctl_status.pack(side="right")
 
+        # Language selector
+        lang_frame = ttk.Frame(top)
+        lang_frame.pack(side="right", padx=(8, 0))
+
+        self.lang_var = tk.StringVar(value=self.current_lang)
+        self.lang_combo = ttk.Combobox(
+            lang_frame,
+            textvariable=self.lang_var,
+            values=sorted(I18N_TEXT.keys()),
+            width=4,
+            state="readonly",
+        )
+        self.lang_combo.pack(side="right")
+
+        ttk.Label(lang_frame, text="Lang:").pack(side="right", padx=(0, 6))
+
+        self.lang_combo.bind("<<ComboboxSelected>>", self.on_language_changed)
+        
+        
         # 中间: 频率/模式/PTT/Preamp
         mid = ttk.Frame(self.master, padding=6)
         mid.pack(side="top", fill="x")
 
         # 频率 / 模式 / RTS PTT
-        freq_frame = ttk.LabelFrame(mid, text="频率 / 模式 / PTT (RTS)", padding=6)
-        freq_frame.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        self.freq_frame = ttk.LabelFrame(mid, text=_T("frame_freq_mode_ptt"), padding=6)
+        self.freq_frame.pack(side="left", fill="both", expand=True, padx=(0, 6))
 
+        freq_frame = self.freq_frame
         row1 = ttk.Frame(freq_frame)
         row1.pack(fill="x", pady=2)
-        ttk.Label(row1, text="Freq (Hz):").pack(side="left")
+        self.lbl_freq_static = ttk.Label(row1, text=_T("label_freq_static"))
+        self.lbl_freq_static.pack(side="left")
         self.freq_entry = ttk.Entry(row1, width=12)
         self.freq_entry.pack(side="left", padx=4)
-        ttk.Button(row1, text="读", command=self.on_read_freq).pack(side="left", padx=2)
-        ttk.Button(row1, text="写", command=self.on_set_freq).pack(side="left", padx=2)
+        ttk.Button(row1, text=DISPLAY_TEXT["btn_read"], command=self.on_read_freq).pack(side="left", padx=2)
+        ttk.Button(row1, text=DISPLAY_TEXT["btn_write"], command=self.on_set_freq).pack(side="left", padx=2)
 
         row2 = ttk.Frame(freq_frame)
         row2.pack(fill="x", pady=2)
-        ttk.Label(row2, text="Mode:").pack(side="left")
+        self.lbl_mode_static = ttk.Label(row2, text=_T("label_mode_static"))
+        self.lbl_mode_static.pack(side="left")
         self.mode_var = tk.StringVar()
         mode_values = sorted(set(P2_TO_MODE.values()))  # 字符串模式列表
         self.mode_combo = ttk.Combobox(row2, textvariable=self.mode_var, values=mode_values, width=12, state="readonly")
         self.mode_combo.pack(side="left", padx=4)
-        ttk.Button(row2, text="读", command=self.on_read_mode).pack(side="left", padx=2)
-        ttk.Button(row2, text="写", command=self.on_set_mode).pack(side="left", padx=2)
+        ttk.Button(row2, text=DISPLAY_TEXT["btn_read"], command=self.on_read_mode).pack(side="left", padx=2)
+        ttk.Button(row2, text=DISPLAY_TEXT["btn_write"], command=self.on_set_mode).pack(side="left", padx=2)
 
         row3 = ttk.Frame(freq_frame)
         row3.pack(fill="x", pady=2)
         self.rts_var = tk.BooleanVar(value=False)
         self.rts_check = ttk.Checkbutton(
-            row3, text="RTS PTT", variable=self.rts_var, command=self.on_toggle_rts
+            row3, text=DISPLAY_TEXT["label_rts_ptt"], variable=self.rts_var, command=self.on_toggle_rts
         )
         self.rts_check.pack(side="left")
-        ttk.Button(row3, text="刷新 RTS", command=self.on_read_rts).pack(side="left", padx=4)
+        self.btn_refresh_rts = ttk.Button(row3, text=_T("btn_refresh_rts", "Refresh"), command=self.on_read_rts)
+        self.btn_refresh_rts.pack(side="left", padx=4)
 
 
         # AGC
         row4 = ttk.Frame(freq_frame)
         row4.pack(fill="x", pady=2)
-        ttk.Label(row4, text="AGC:").pack(side="left")
+        self.lbl_agc = ttk.Label(row4, text=_T("label_agc", "AGC:"))
+        self.lbl_agc.pack(side="left")
         self.agc_var = tk.StringVar(value="AUTO")
         # Set 可选：OFF / FAST / MID / SLOW / AUTO
         agc_values = ["OFF", "FAST", "MID", "SLOW", "AUTO"]
         self.agc_combo = ttk.Combobox(row4, textvariable=self.agc_var, values=agc_values, width=12, state="readonly")
         self.agc_combo.pack(side="left", padx=4)
-        ttk.Button(row4, text="读", command=self.on_read_agc).pack(side="left", padx=2)
-        ttk.Button(row4, text="写", command=self.on_set_agc).pack(side="left", padx=2)
+        ttk.Button(row4, text=DISPLAY_TEXT["btn_read"], command=self.on_read_agc).pack(side="left", padx=2)
+        ttk.Button(row4, text=DISPLAY_TEXT["btn_write"], command=self.on_set_agc).pack(side="left", padx=2)
         self.agc_readback_var = tk.StringVar(value="—")
         ttk.Label(row4, textvariable=self.agc_readback_var, font=("Consolas", 10)).pack(side="left", padx=(8, 0))
 
         # Power (PC)
         row5 = ttk.Frame(freq_frame)
         row5.pack(fill="x", pady=2)
-        ttk.Label(row5, text="Power (W):").pack(side="left")
+        self.lbl_power = ttk.Label(row5, text=_T("label_power_w", "Power (W):"))
+        self.lbl_power.pack(side="left")
         self.power_entry = ttk.Entry(row5, width=6)
         self.power_entry.pack(side="left", padx=4)
-        ttk.Button(row5, text="读", command=self.on_read_power).pack(side="left", padx=2)
-        ttk.Button(row5, text="写", command=self.on_set_power).pack(side="left", padx=2)
+        ttk.Button(row5, text=DISPLAY_TEXT["btn_read"], command=self.on_read_power).pack(side="left", padx=2)
+        ttk.Button(row5, text=DISPLAY_TEXT["btn_write"], command=self.on_set_power).pack(side="left", padx=2)
         self.power_dev_var = tk.StringVar(value="—")
         ttk.Label(row5, textvariable=self.power_dev_var, font=("Consolas", 10)).pack(side="left", padx=(8, 0))
 
         # Preamp
-        preamp_frame = ttk.LabelFrame(mid, text="Preamp / IPO", padding=6)
-        preamp_frame.pack(side="left", fill="both", expand=True)
+        self.preamp_frame = ttk.LabelFrame(mid, text=_T("frame_preamp"), padding=6)
+        self.preamp_frame.pack(side="left", fill="both", expand=True)
 
+        preamp_frame = self.preamp_frame
         self._build_preamp_row(preamp_frame, "HF50", ["IPO", "AMP1", "AMP2"])
         self._build_preamp_row(preamp_frame, "VHF", ["OFF", "ON"])
         self._build_preamp_row(preamp_frame, "UHF", ["OFF", "ON"])
 
         # Manual Notch + 瀑布
-        notch_frame = ttk.LabelFrame(self.master, text="Manual Notch (MAIN)", padding=6)
+        self.notch_frame = ttk.LabelFrame(self.master, text=_T("frame_notch_main", "Manual Notch (MAIN)"), padding=6)
+        notch_frame = self.notch_frame
         notch_frame.pack(side="top", fill="both", expand=True, padx=6, pady=4)
 
         top_row = ttk.Frame(notch_frame)
         top_row.pack(fill="x")
 
         # 提示：点击瀑布图（FFT 图像）来设置 Notch
-        ttk.Label(
-            top_row,
-            text="提示：点击下方 FFT/瀑布图可设置 Notch（带宽 100 Hz）",
-            foreground="#666666",
-        ).pack(side="left", padx=(0, 12))
+        self.lbl_notch_hint = ttk.Label(top_row, text=_T("hint_fft_click_notch"), foreground="#666666")
+        self.lbl_notch_hint.pack(side="left", padx=(0, 12))
 
-        ttk.Checkbutton(
-            top_row,
-            text="启用 Notch",
-            variable=self.notch_enabled_var,
-            command=self.on_notch_toggle,
-        ).pack(side="left")
+        self.chk_enable_notch = ttk.Checkbutton(top_row, text=_T("chk_enable_notch", "Enable"), variable=self.notch_enabled_var, command=self.on_notch_toggle)
+        self.chk_enable_notch.pack(side="left")
 
-        ttk.Label(top_row, text="频率(Hz):").pack(side="left", padx=(12, 2))
+        self.lbl_notch_freq = ttk.Label(top_row, text=_T("label_freq_hz"))
+        self.lbl_notch_freq.pack(side="left", padx=(12, 2))
         notch_entry = ttk.Entry(top_row, textvariable=self.notch_freq_input_var, width=8)
         notch_entry.pack(side="left")
         notch_entry.bind("<Return>", lambda _e: self.on_set_notch_freq())
 
-        ttk.Label(top_row, text="当前:").pack(side="left", padx=(8, 2))
+        self.lbl_notch_current = ttk.Label(top_row, text=_T("label_current"))
+        self.lbl_notch_current.pack(side="left", padx=(8, 2))
         ttk.Label(top_row, textvariable=self.notch_freq_var, width=10).pack(side="left")
 
-        ttk.Button(top_row, text="设置", command=self.on_set_notch_freq).pack(side="left", padx=4)
-        ttk.Button(top_row, text="读取", command=self.on_read_notch).pack(side="left", padx=2)
+        self.btn_set_notch = ttk.Button(top_row, text=_T("btn_set"), command=self.on_set_notch_freq)
+        self.btn_set_notch.pack(side="left", padx=4)
+        self.btn_read_notch = ttk.Button(top_row, text=_T("menu_read"), command=self.on_read_notch)
+        self.btn_read_notch.pack(side="left", padx=2)
 
         # 瀑布面板
         self.waterfall_panel = MicWaterfallPanel(
@@ -1019,7 +1192,8 @@ class FTX1TkApp:
         left_bottom = ttk.Frame(bottom)
         left_bottom.pack(side="left", fill="y")
 
-        ttk.Label(left_bottom, text="Meter 刷新率 (Hz):").pack(anchor="w")
+        self.lbl_meter_rate = ttk.Label(left_bottom, text=_T("label_meter_rate"))
+        self.lbl_meter_rate.pack(anchor="w")
         rate_values = [5, 2, 1, 0.5, 0.2, 0.1]
         self.rate_combo = ttk.Combobox(
             left_bottom,
@@ -1031,11 +1205,12 @@ class FTX1TkApp:
         self.rate_combo.pack(anchor="w")
         self.rate_combo.set("1.0")
 
-        self.status_var = tk.StringVar(value="未连接")
+        self.status_var = tk.StringVar(value=DISPLAY_TEXT["status_disconnected"])
         ttk.Label(left_bottom, textvariable=self.status_var, foreground="#0080ff").pack(anchor="w", pady=(8, 0))
 
         # 表头 Meters（右侧）
-        meter_frame = ttk.LabelFrame(bottom, text="Meters", padding=6)
+        self.meter_frame = ttk.LabelFrame(bottom, text=_T("frame_meters"), padding=6)
+        meter_frame = self.meter_frame
         meter_frame.pack(side="left", fill="both", expand=True, padx=(12, 0))
 
         self.meter_widgets = {}
@@ -1066,11 +1241,11 @@ class FTX1TkApp:
     # ---------- 全量读取（所有参数）----------
 
     def on_full_read(self):
-        """按钮：立刻触发一次全量读取（用实际数据覆盖 UI 当前值）。"""
+        """ """
         self._schedule_full_read(delay_ms=0)
 
     def on_network_activity(self):
-        """rigctl 等网络指令有写入动作后调用：1 秒后全量读取（可被重置）。"""
+        """ """
         # 在子线程里回调，切回 Tk 主线程
         try:
             self.master.after(0, lambda: self._schedule_full_read(delay_ms=1000))
@@ -1154,7 +1329,7 @@ class FTX1TkApp:
         self._full_read_thread.start()
 
     def _apply_full_read_result(self, result: dict):
-        """用实际数据覆盖 UI 当前值。"""
+        """ """
         # freq
         freq_hz = result.get("freq_hz")
         if freq_hz is not None:
@@ -1269,10 +1444,10 @@ class FTX1TkApp:
                 self.cat.set_preamp(band, var.get())
                 self._schedule_full_read(delay_ms=1000)
             except Exception as e:
-                messagebox.showerror("Preamp 设置失败", str(e))
+                messagebox.showerror(DISPLAY_TEXT["preamp_set_failed"], str(e))
 
-        ttk.Button(frame, text="读", command=do_read).pack(side="left", padx=2)
-        ttk.Button(frame, text="写", command=do_set).pack(side="left", padx=2)
+        ttk.Button(frame, text=DISPLAY_TEXT["btn_read"], command=do_read).pack(side="left", padx=2)
+        ttk.Button(frame, text=DISPLAY_TEXT["btn_write"], command=do_set).pack(side="left", padx=2)
 
     # ---------- 连接 / 断开 ----------
 
@@ -1282,17 +1457,17 @@ class FTX1TkApp:
         port = self.port_entry.get().strip()
         port2 = self.port2_entry.get().strip()
         if not port or not port2:
-            messagebox.showwarning("错误", "请填写 CAT 串口和 PTT 串口")
+            messagebox.showwarning(DISPLAY_TEXT["error_title"], DISPLAY_TEXT["need_cat_and_ptt_ports"])
             return
         try:
             baud = int(self.baud_entry.get().strip())
         except ValueError:
-            messagebox.showwarning("错误", "CAT 波特率应为整数")
+            messagebox.showwarning(DISPLAY_TEXT["error_title"], DISPLAY_TEXT["cat_baud_must_int"])
             return
         try:
             baud2 = int(self.baud2_entry.get().strip())
         except ValueError:
-            messagebox.showwarning("错误", "PTT 波特率应为整数")
+            messagebox.showwarning(DISPLAY_TEXT["error_title"], DISPLAY_TEXT["ptt_baud_must_int"])
             return
 
         try:
@@ -1301,10 +1476,10 @@ class FTX1TkApp:
                                timeout=1.0)
         except Exception as e:
             self.cat = None
-            messagebox.showerror("连接失败", str(e))
+            messagebox.showerror(DISPLAY_TEXT["connect_failed"], str(e))
             return
 
-        self.status_var.set(f"已连接 CAT:{port}@{baud}  PTT(RTS):{port2}@{baud2}")
+        self.status_var.set(DISPLAY_TEXT["status_connected_fmt"].format(port=port, baud=baud, port2=port2, baud2=baud2))
         self.btn_connect.configure(state="disabled")
         self.btn_disconnect.configure(state="normal")
 
@@ -1317,7 +1492,7 @@ class FTX1TkApp:
 
         self.rigctl_server = RigctlTCPServer(self.cat, host="127.0.0.1", port=tcp_port, on_activity=self.on_network_activity)
         self.rigctl_server.start()
-        self.rigctl_status_var.set(f"rigctl: 已启动 ({tcp_port})")
+        self.rigctl_status_var.set(DISPLAY_TEXT["rigctl_started_fmt"].format(tcp_port=tcp_port))
 
 
         # 连接后：先全量读取一次，确保 UI 与机器状态一致
@@ -1334,14 +1509,17 @@ class FTX1TkApp:
             except Exception:
                 pass
         self.cat = None
-        self.status_var.set("未连接")
+        self.status_var.set(DISPLAY_TEXT["status_disconnected"])
         self.btn_connect.configure(state="normal")
         self.btn_disconnect.configure(state="disabled")
 
         if self.rigctl_server:
             self.rigctl_server.stop()
             self.rigctl_server = None
-            self.rigctl_status_var.set("rigctl: 停止")
+
+        # i18n language (default zh)
+        self.current_lang = "en"
+        self.rigctl_status_var.set(DISPLAY_TEXT["rigctl_stop"])
 
 
         # 断开时：取消全量读取计划
@@ -1363,7 +1541,7 @@ class FTX1TkApp:
             return
         freq_hz, _ = self.cat.get_freq()
         if freq_hz is None:
-            messagebox.showerror("读取失败", "无法解析频率")
+            messagebox.showerror(DISPLAY_TEXT["read_failed"], DISPLAY_TEXT["freq_parse_failed"])
             return
         self.freq_entry.delete(0, tk.END)
         self.freq_entry.insert(0, str(freq_hz))
@@ -1375,20 +1553,20 @@ class FTX1TkApp:
         try:
             freq_hz = int(float(text))
         except ValueError:
-            messagebox.showwarning("错误", "频率必须是数字")
+            messagebox.showwarning(DISPLAY_TEXT["error_title"], DISPLAY_TEXT["freq_must_number"])
             return
         try:
             self.cat.set_freq(freq_hz)
             self._schedule_full_read(delay_ms=1000)
         except Exception as e:
-            messagebox.showerror("设置失败", str(e))
+            messagebox.showerror(DISPLAY_TEXT["set_failed"], str(e))
 
     def on_read_mode(self):
         if not self.cat:
             return
         mode_name, _ = self.cat.get_mode(main=True)
         if mode_name is None:
-            messagebox.showerror("读取失败", "返回了非法模式代码")
+            messagebox.showerror(DISPLAY_TEXT["read_failed"], DISPLAY_TEXT["illegal_mode_code"])
             return
         self.mode_var.set(mode_name)
 
@@ -1402,7 +1580,7 @@ class FTX1TkApp:
             self.cat.set_mode(mode_name, main=True)
             self._schedule_full_read(delay_ms=1000)
         except Exception as e:
-            messagebox.showerror("设置失败", str(e))
+            messagebox.showerror(DISPLAY_TEXT["set_failed"], str(e))
 
     def on_toggle_rts(self):
         if not self.cat:
@@ -1411,7 +1589,7 @@ class FTX1TkApp:
             self.cat.set_rts(self.rts_var.get())
             self._schedule_full_read(delay_ms=1000)
         except Exception as e:
-            messagebox.showerror("RTS PTT 设置失败", str(e))
+            messagebox.showerror(DISPLAY_TEXT["rts_ptt_set_failed"], str(e))
             # 回退 UI
             self.on_read_rts()
 
@@ -1422,7 +1600,7 @@ class FTX1TkApp:
         try:
             agc_name, _ = self.cat.get_agc(main=True)
         except Exception as e:
-            messagebox.showerror("读取失败", f"AGC 读取失败: {e}")
+            messagebox.showerror(DISPLAY_TEXT["read_failed"], DISPLAY_TEXT["agc_read_failed_fmt"].format(e=e))
             return
         # 读回值可能是 AUTO-FAST / AUTO-MID / AUTO-SLOW
         if not agc_name:
@@ -1445,7 +1623,7 @@ class FTX1TkApp:
             self.cat.set_agc(agc, main=True)
             self._schedule_full_read(delay_ms=1000)
         except Exception as e:
-            messagebox.showerror("AGC 设置失败", str(e))
+            messagebox.showerror(DISPLAY_TEXT["agc_set_failed"], str(e))
             # 回退读取状态
             self.on_read_agc()
 
@@ -1455,7 +1633,7 @@ class FTX1TkApp:
         try:
             dev, watts, _ = self.cat.get_power_control()
         except Exception as e:
-            messagebox.showerror("读取失败", f"功率读取失败: {e}")
+            messagebox.showerror(DISPLAY_TEXT["read_failed"], DISPLAY_TEXT["power_read_failed_fmt"].format(e=e))
             return
         if watts is None:
             try:
@@ -1480,13 +1658,13 @@ class FTX1TkApp:
         try:
             w = int(float(s))
         except ValueError:
-            messagebox.showwarning("错误", "功率必须是整数 W")
+            messagebox.showwarning(DISPLAY_TEXT["error_title"], DISPLAY_TEXT["power_must_int_w"])
             return
         try:
             self.cat.set_power_watts(w)
             self._schedule_full_read(delay_ms=1000)
         except Exception as e:
-            messagebox.showerror("功率设置失败", str(e))
+            messagebox.showerror(DISPLAY_TEXT["power_set_failed"], str(e))
             self.on_read_power()
 
     def on_read_rts(self):
@@ -1495,7 +1673,7 @@ class FTX1TkApp:
         try:
             val = self.cat.get_rts()
         except Exception as e:
-            messagebox.showerror("读取失败", f"无法读取 RTS 状态: {e}")
+            messagebox.showerror(DISPLAY_TEXT["read_failed"], DISPLAY_TEXT["rts_read_failed_fmt"].format(e=e))
             return
         self.rts_var.set(bool(val))
 
@@ -1520,19 +1698,19 @@ class FTX1TkApp:
             self.notch_freq_input_var.set(str(freq_hz))
 
     def on_set_notch_freq(self):
-        """允许像频率一样手动输入 Notch 频率（Hz）。"""
+        """ """
         text = (self.notch_freq_input_var.get() or "").strip()
         if not text:
             return
         try:
             f = float(text)
         except Exception:
-            messagebox.showwarning("错误", "Notch 频率必须是数字 (Hz)")
+            messagebox.showwarning(_T("error_title"), _T("notch_freq_must_number", "Notch frequency must be a number"))
             return
         self._apply_notch_freq(f)
 
     def _get_notch_state_for_plot(self):
-        """给瀑布图用：返回 (enabled, freq_hz)。"""
+        """ """
         # notch_freq_var 里带 " Hz"，这里优先读输入框/显示值
         enabled = bool(self.notch_enabled_var.get())
         freq = None
@@ -1556,7 +1734,7 @@ class FTX1TkApp:
             self._schedule_full_read(delay_ms=1000)
             self._refresh_notch_overlay()
         except Exception as e:
-            messagebox.showerror("Notch 设置失败", str(e))
+            messagebox.showerror(_T("notch_set_failed", "Notch set failed"), str(e))
             # 回退读取状态
             self.on_read_notch()
 
@@ -1579,7 +1757,7 @@ class FTX1TkApp:
                 self._schedule_full_read(delay_ms=1000)
                 self._refresh_notch_overlay()
             except Exception as e:
-                messagebox.showerror("Notch 设置失败", str(e))
+                messagebox.showerror(_T("notch_set_failed", "Notch set failed"), str(e))
             return
 
         freq_hz = steps * 10
@@ -1589,7 +1767,7 @@ class FTX1TkApp:
             self.notch_freq_var.set(f"{freq_hz} Hz")
             self.notch_freq_input_var.set(str(freq_hz))
         except Exception as e:
-            messagebox.showerror("Notch 设置失败", str(e))
+            messagebox.showerror(_T("notch_set_failed", "Notch set failed"), str(e))
 
     # ---------- Meters 周期刷新 ----------
 
@@ -1615,7 +1793,7 @@ class FTX1TkApp:
             data = self.cat.read_all_meters()
         except Exception as e:
             # 读取失败时，不弹窗避免刷屏，只在状态条简单提示一次
-            self.status_var.set(f"读 meter 失败: {e}")
+            self.status_var.set(_T("meter_read_failed_fmt", "Meter read failed: {e}").format(e=e))
             return
 
         for name, widget in self.meter_widgets.items():
@@ -1641,6 +1819,19 @@ def main():
     root = tk.Tk()
     app = FTX1TkApp(root)
     root.mainloop()
+
+# --------------------------
+# Docstrings (i18n extracted)
+# --------------------------
+try:
+    MicWaterfallPanel.refresh_plot.__doc__ = DISPLAY_TEXT["hint_force_waterfall_refresh"]
+    FTX1TkApp.on_full_read.__doc__ = DISPLAY_TEXT["hint_btn_full_read"]
+    FTX1TkApp.on_network_activity.__doc__ = DISPLAY_TEXT["hint_rigctl_autoread"]
+    FTX1TkApp._apply_full_read_result.__doc__ = DISPLAY_TEXT["hint_overwrite_ui"]
+    FTX1TkApp.on_set_notch_freq.__doc__ = DISPLAY_TEXT["hint_notch_input"]
+    FTX1TkApp._get_notch_state_for_plot.__doc__ = DISPLAY_TEXT["doc_for_waterfall"]
+except Exception:
+    pass
 
 
 if __name__ == "__main__":

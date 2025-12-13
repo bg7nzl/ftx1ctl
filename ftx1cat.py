@@ -5,6 +5,13 @@ from typing import Optional, Dict, Tuple
 
 import serial
 
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+from i18n import I18N_TEXT as I18N_TEXT
+
+DISPLAY_TEXT = I18N_TEXT["en"]
+
 
 # ==========================
 # 串口 & CAT 封装为类
@@ -445,7 +452,7 @@ class FTX1Cat:
         
         mode_name = mode_name.upper()
         if mode_name not in MODE_TO_P2:
-            raise ValueError(f"非法模式名: {mode_name}")
+            raise ValueError(DISPLAY_TEXT["err_invalid_mode_fmt"].format(mode_name=mode_name))
         p2 = MODE_TO_P2[mode_name]
         p1 = "0" if main else "1"
         resp = self._send_cat(f"MD{p1}{p2}")
@@ -501,7 +508,7 @@ class FTX1Cat:
 
         agc_u = agc.strip().upper()
         if agc_u not in AGC_NAME_TO_P2:
-            raise ValueError(f"非法 AGC 选项: {agc!r}，可选 {list(AGC_NAME_TO_P2.keys())}")
+            raise ValueError(DISPLAY_TEXT["err_invalid_agc_fmt"].format(agc=agc, opts=list(AGC_NAME_TO_P2.keys())))
 
         p1 = "0" if main else "1"
         p2 = AGC_NAME_TO_P2[agc_u]
@@ -566,21 +573,21 @@ class FTX1Cat:
         """
 
         if not isinstance(watts, int):
-            raise TypeError("watts 必须是 int")
+            raise TypeError(DISPLAY_TEXT["err_watts_type"])
 
         dev, cur_w, raw = self.get_power_control()
         if dev is None:
-            raise RuntimeError(f"无法解析当前 PC 返回：{raw!r}")
+            raise RuntimeError(DISPLAY_TEXT["err_parse_pc_fmt"].format(raw=raw))
 
         if dev == "FIELD":
             if watts < 1 or watts > 10:
-                raise ValueError("FIELD 模式功率范围为 1~10W")
+                raise ValueError(DISPLAY_TEXT["err_field_power_range"])
             p1 = "1"
             p2 = f"{watts:03d}"  # 001~010
         else:
             # SPA1
             if watts < 5 or watts > 100:
-                raise ValueError("SPA-1 模式功率范围为 5~100W")
+                raise ValueError(DISPLAY_TEXT["err_spa1_power_range"])
             p1 = "2"
             p2 = f"{watts:03d}"  # 005~100
 
@@ -661,7 +668,7 @@ class FTX1Cat:
             最后一条 CAT 命令的原始返回字符串（如果两个都设置，则是频率那条的返回）
         """
         if enabled is None and freq_hz is None:
-            raise ValueError("set_manual_notch: enabled 和 freq_hz 不能同时为 None")
+            raise ValueError(DISPLAY_TEXT["err_notch_args"])
 
         
         p1 = "0" if main else "1"
@@ -680,7 +687,7 @@ class FTX1Cat:
             # FTX-1: P3 = 001-320, 单位 10 Hz，即 10~3200 Hz
             steps = int(round(freq_hz / 10))
             if steps < 1 or steps > 320:
-                raise ValueError("set_manual_notch: freq_hz 超出范围 (10~3200 Hz)")
+                raise ValueError(DISPLAY_TEXT["err_notch_range"])
 
             p2 = "1"
             p3 = steps
@@ -768,7 +775,7 @@ class FTX1Cat:
         # 规范化 band 字符串
         b = band.upper()
         if b not in BAND_TO_P1:
-            raise ValueError(f"invalid band for preamp: {band!r}, 需在 HF/HF50/HF/50/VHF/UHF 中选择")
+            raise ValueError(DISPLAY_TEXT["err_invalid_band_fmt"].format(band=band))
 
         p1 = BAND_TO_P1[b]
 
@@ -817,7 +824,7 @@ class FTX1Cat:
         """
         b = band.upper()
         if b not in BAND_TO_P1:
-            raise ValueError(f"invalid band for preamp: {band!r}, 需在 HF/HF50/HF/50/VHF/UHF 中选择")
+            raise ValueError(DISPLAY_TEXT["err_invalid_band_fmt"].format(band=band))
 
         p1 = BAND_TO_P1[b]
 
@@ -826,12 +833,12 @@ class FTX1Cat:
         if p1 == "0":
             # HF/50
             if lvl not in HF50_PREAMP_TO_P2:
-                raise ValueError(f"HF/50 band preamp level 只能是: {list(HF50_PREAMP_TO_P2.keys())}, got {level!r}")
+                raise ValueError(DISPLAY_TEXT["err_hf50_preamp_level_fmt"].format(opts=list(HF50_PREAMP_TO_P2.keys()), level=level))
             p2 = HF50_PREAMP_TO_P2[lvl]
         else:
             # VHF/UHF
             if lvl not in VU_PREAMP_TO_P2:
-                raise ValueError(f"VHF/UHF band preamp level 只能是: {list(VU_PREAMP_TO_P2.keys())}, got {level!r}")
+                raise ValueError(DISPLAY_TEXT["err_vu_preamp_level_fmt"].format(opts=list(VU_PREAMP_TO_P2.keys()), level=level))
             p2 = VU_PREAMP_TO_P2[lvl]
 
         cmd = f"PA{p1}{p2}"
