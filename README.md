@@ -8,6 +8,11 @@ Additionally, it features a built-in **Hamlib NET rigctl server**, allowing seam
 
 ---
 
+<img width="1333" height="857" alt="2025-12-13 152319" src="https://github.com/user-attachments/assets/ff233183-806b-4d72-9d70-6706687a3bbd" />
+
+
+---
+
 ## 🇬🇧 English
 
 ### Key Features
