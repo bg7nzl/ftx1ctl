@@ -1,5 +1,6 @@
 import socket
 import threading
+import queue
 import math
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -622,6 +623,9 @@ class MicWaterfallPanel(ttk.Frame):
         )
 
         self.mesh = None
+        self.im = None
+        self._notch_line_lo = None
+        self._notch_line_hi = None
 
         self.canvas = FigureCanvasTkAgg(fig, master=self)
         self.canvas.draw()
@@ -724,22 +728,22 @@ class MicWaterfallPanel(ttk.Frame):
         self.after(120, self._schedule_update_plot)
 
     def update_plot(self):
+        """Redraw / update waterfall using a fast imshow backend.
+
+        IMPORTANT: This runs in the Tk thread. Audio capture happens in a background thread,
+        but all matplotlib/tk calls stay here.
+        """
         with self.data_lock:
-            fc = self.frame_count
-            if fc == 0:
-                return
+            fc = int(self.frame_count)
             wf = self.waterfall.copy()
 
-        # 组装一个“固定宽度”的显示窗口：shape = (n_freq, MAX_FRAMES)
-        # 右侧是最新(0s)，左侧是更早。
+        # Assemble a fixed-width display buffer: shape=(n_freq, MAX_FRAMES)
         data_display = np.full((self.n_freq, self.MAX_FRAMES), np.nan, dtype=np.float32)
-
         if fc < self.MAX_FRAMES:
-            # 还没填满：把已有数据放到最右侧，其余保持 NaN（空白）
             n_frames = fc
-            data_display[:, -n_frames:] = wf[:, :n_frames]
+            if n_frames > 0:
+                data_display[:, -n_frames:] = wf[:, :n_frames]
         else:
-            # 已经填满：把环形缓冲按时间顺序展开成“从旧到新”
             oldest_col = fc % self.MAX_FRAMES
             if oldest_col == 0:
                 ordered = wf
@@ -747,46 +751,40 @@ class MicWaterfallPanel(ttk.Frame):
                 ordered = np.concatenate([wf[:, oldest_col:], wf[:, :oldest_col]], axis=1)
             data_display[:, :] = ordered
 
-        # x 轴：固定为 [-window_seconds, 0]，用“秒(过去)”显示刻度
-        t_rel = np.linspace(-self.window_seconds + self.dt, 0.0, self.MAX_FRAMES)
+        # Lazily create imshow artist once
+        if getattr(self, "im", None) is None:
+            self.im = self.ax.imshow(
+                data_display,
+                origin="lower",
+                aspect="auto",
+                extent=[-self.window_seconds, 0.0, 0.0, self.MAX_FREQ],
+                interpolation="nearest",
+                vmin=-120.0,
+                vmax=-20.0,
+            )
+            # Notch lines (hidden by default)
+            self._notch_line_lo = self.ax.axhline(0.0, color="red", linewidth=1, visible=False)
+            self._notch_line_hi = self.ax.axhline(0.0, color="red", linewidth=1, visible=False)
 
-        # 清理并重画
-        self.ax.cla()
-        self.ax.set_title("")
-        self.ax.set_xlabel("t (s)")
-        self.ax.set_ylabel("Frequency (Hz)")
-        self.ax.set_ylim(0, self.MAX_FREQ)
-        self.ax.set_xlim(-self.window_seconds, 0.0)
-        self.ax.tick_params(axis="x", top=True, labeltop=True, bottom=True, labelbottom=True)
+        # Update image data
+        self.im.set_data(data_display)
 
-        # 固定刻度：右端 0，向左递增“过去多少秒”
-        # 取 6 个主刻度（含 0）
-        n_ticks = 6
-        tick_pos = np.linspace(-self.window_seconds, 0.0, n_ticks)
-        tick_lbl = [f"{abs(x):.0f}" for x in tick_pos]
-        tick_lbl[-1] = "0"
-        self.ax.set_xticks(tick_pos)
-        self.ax.set_xticklabels(tick_lbl)
-
-        # 颜色范围用分位数（忽略 NaN），避免极端值
+        # Robust color scaling (ignore NaN), avoid extreme spikes
         valid = data_display[np.isfinite(data_display)]
         if valid.size == 0:
             vmin, vmax = -120.0, -20.0
         else:
-            vmin = np.percentile(valid, 5)
-            vmax = np.percentile(valid, 95)
+            vmin = float(np.percentile(valid, 5))
+            vmax = float(np.percentile(valid, 95))
+            if not np.isfinite(vmin):
+                vmin = -120.0
+            if not np.isfinite(vmax):
+                vmax = -20.0
+            if vmax <= vmin:
+                vmax = vmin + 1.0
+        self.im.set_clim(vmin, vmax)
 
-        data_masked = np.ma.masked_invalid(data_display)
-        self.mesh = self.ax.pcolormesh(
-            t_rel,
-            self.freqs,
-            data_masked,
-            shading="auto",
-            vmin=vmin,
-            vmax=vmax,
-        )
-
-        # 在图上画 Notch 的两条红线（带宽 100 Hz）
+        # Update notch overlay lines (bandwidth 100 Hz)
         try:
             if self.get_notch_state is not None:
                 enabled, notch_hz = self.get_notch_state()
@@ -800,8 +798,19 @@ class MicWaterfallPanel(ttk.Frame):
             bw = 100.0
             f_lo = f0 - bw / 2.0
             f_hi = f0 + bw / 2.0
-            self.ax.axhline(f_lo, color="red", linewidth=1)
-            self.ax.axhline(f_hi, color="red", linewidth=1)
+            try:
+                self._notch_line_lo.set_ydata([f_lo, f_lo])
+                self._notch_line_hi.set_ydata([f_hi, f_hi])
+                self._notch_line_lo.set_visible(True)
+                self._notch_line_hi.set_visible(True)
+            except Exception:
+                pass
+        else:
+            try:
+                self._notch_line_lo.set_visible(False)
+                self._notch_line_hi.set_visible(False)
+            except Exception:
+                pass
 
         self.canvas.draw_idle()
 
@@ -820,7 +829,7 @@ class MicWaterfallPanel(ttk.Frame):
     def refresh_plot(self):
         """ """
         try:
-            self._update_plot()
+            self.update_plot()
         except Exception:
             pass
 
@@ -853,6 +862,11 @@ class FTX1TkApp:
 
         # 刷新率 (Hz)
         self.refresh_rate_var = tk.DoubleVar(value=1.0)
+        self._meter_hz = 1.0
+        try:
+            self.refresh_rate_var.trace_add('write', lambda *_: self._on_refresh_rate_changed())
+        except Exception:
+            pass
 
         # Manual Notch 当前状态
         self.notch_enabled_var = tk.BooleanVar(value=False)
@@ -871,11 +885,20 @@ class FTX1TkApp:
         # Apply initial language to all widgets
         self.apply_language()
 
-        # 启动定时刷新
+        # 启动 Meter 后台线程 + UI 轮询
+        self._start_meter_thread()
         self._schedule_meter_update()
 
         self.master.protocol("WM_DELETE_WINDOW", self.on_close)
 
+
+
+    def _on_refresh_rate_changed(self):
+        # Tk thread: cache refresh rate for worker thread (tk vars are not thread-safe)
+        try:
+            self._meter_hz = float(self.refresh_rate_var.get())
+        except Exception:
+            self._meter_hz = 1.0
 
     def on_language_changed(self, event=None):
         lang = (self.lang_var.get() or "").strip()
@@ -1043,15 +1066,6 @@ class FTX1TkApp:
         self.btn_full_read = ttk.Button(top, text=DISPLAY_TEXT["btn_full_read"], command=self.on_full_read, state="disabled")
         self.btn_full_read.pack(side="left", padx=(12, 4))
 
-        self.lbl_rigctl_port = ttk.Label(top, text=_T("label_rigctl_port"))
-        self.lbl_rigctl_port.pack(side="left", padx=(20, 2))
-        self.port_tcp_entry = ttk.Entry(top, width=6, textvariable=self.tcp_port_var)
-        self.port_tcp_entry.pack(side="left", padx=2)
-
-        self.rigctl_status_var = tk.StringVar(value=DISPLAY_TEXT["rigctl_stop"])
-        self.lbl_rigctl_status = ttk.Label(top, textvariable=self.rigctl_status_var)
-        self.lbl_rigctl_status.pack(side="right")
-
         # Language selector
         lang_frame = ttk.Frame(top)
         lang_frame.pack(side="right", padx=(8, 0))
@@ -1070,6 +1084,15 @@ class FTX1TkApp:
 
         self.lang_combo.bind("<<ComboboxSelected>>", self.on_language_changed)
         
+
+        self.lbl_rigctl_port = ttk.Label(top, text=_T("label_rigctl_port"))
+        self.lbl_rigctl_port.pack(side="left", padx=(20, 2))
+        self.port_tcp_entry = ttk.Entry(top, width=6, textvariable=self.tcp_port_var)
+        self.port_tcp_entry.pack(side="left", padx=2)
+
+        self.rigctl_status_var = tk.StringVar(value=DISPLAY_TEXT["rigctl_stop"])
+        self.lbl_rigctl_status = ttk.Label(top, textvariable=self.rigctl_status_var)
+        self.lbl_rigctl_status.pack(side="right")
         
         # 中间: 频率/模式/PTT/Preamp
         mid = ttk.Frame(self.master, padding=6)
@@ -1452,6 +1475,7 @@ class FTX1TkApp:
     # ---------- 连接 / 断开 ----------
 
     def on_connect(self):
+        self._start_meter_thread()
         if self.cat is not None:
             return
         port = self.port_entry.get().strip()
@@ -1503,6 +1527,7 @@ class FTX1TkApp:
         self._schedule_full_read(delay_ms=0)
 
     def on_disconnect(self):
+        self._stop_meter_thread()
         if self.cat:
             try:
                 self.cat.close()
@@ -1772,32 +1797,84 @@ class FTX1TkApp:
     # ---------- Meters 周期刷新 ----------
 
     def _schedule_meter_update(self):
+        """UI-thread meter updater: only consumes results produced by the background worker."""
         self._update_meters()
-        # 按当前刷新率重新计算间隔
-        try:
-            hz = float(self.refresh_rate_var.get())
-        except ValueError:
-            hz = 1.0
-        hz = max(min(hz, 5.0), 0.1)  # 限制在 0.1~5 Hz
-        interval_ms = int(1000.0 / hz)
-        self.master.after(interval_ms, self._schedule_meter_update)
 
-    def _update_meters(self):
-        if not self.cat:
-            # 未连接时清空显示
-            for name, widget in self.meter_widgets.items():
-                widget.update_value(None, None)
+        # Keep UI polling fairly light; actual CAT reads happen in worker thread
+        self.master.after(100, self._schedule_meter_update)
+
+    def _start_meter_thread(self):
+        if getattr(self, "_meter_stop", None) is None or getattr(self, "_meter_stop").is_set():
+            self._meter_stop = threading.Event()
+        if getattr(self, "_meter_queue", None) is None:
+            self._meter_queue = queue.Queue(maxsize=1)
+
+        if getattr(self, "_meter_thread", None) is not None and self._meter_thread.is_alive():
             return
 
+        def worker():
+            # NOTE: never touch any tk variables/widgets from this thread.
+            while not self._meter_stop.is_set():
+                try:
+                    hz = float(getattr(self, "_meter_hz", 1.0))
+                except Exception:
+                    hz = 1.0
+                hz = max(min(hz, 5.0), 0.1)
+                sleep_s = 1.0 / hz
+
+                cat = getattr(self, "cat", None)
+                if cat is None:
+                    self._meter_stop.wait(0.2)
+                    continue
+
+                try:
+                    data = cat.read_all_meters()
+                except Exception:
+                    # Don't spam; UI thread will show a brief status if needed
+                    data = None
+
+                # Overwrite previous (keep most recent only)
+                try:
+                    if self._meter_queue.full():
+                        _ = self._meter_queue.get_nowait()
+                    self._meter_queue.put_nowait(data)
+                except Exception:
+                    pass
+
+                self._meter_stop.wait(sleep_s)
+
+        self._meter_thread = threading.Thread(target=worker, daemon=True)
+        self._meter_thread.start()
+
+    def _stop_meter_thread(self):
         try:
-            data = self.cat.read_all_meters()
-        except Exception as e:
-            # 读取失败时，不弹窗避免刷屏，只在状态条简单提示一次
-            self.status_var.set(_T("meter_read_failed_fmt", "Meter read failed: {e}").format(e=e))
+            if getattr(self, "_meter_stop", None) is not None:
+                self._meter_stop.set()
+        except Exception:
+            pass
+
+    def _update_meters(self):
+        """Consume latest meter results and update widgets (Tk thread only)."""
+        if getattr(self, "_meter_queue", None) is None:
+            return
+
+        data = None
+        try:
+            # Drain to latest
+            while True:
+                data = self._meter_queue.get_nowait()
+        except Exception:
+            pass
+
+        if data is None:
+            # If disconnected, clear display; if connected but read failed, keep last values
+            if not self.cat:
+                for _, widget in self.meter_widgets.items():
+                    widget.update_value(None, None)
             return
 
         for name, widget in self.meter_widgets.items():
-            info = data.get(name)
+            info = data.get(name) if isinstance(data, dict) else None
             if not info:
                 widget.update_value(None, None)
                 continue
@@ -1805,10 +1882,10 @@ class FTX1TkApp:
             value = info.get("value")
             widget.update_value(raw, value)
 
-
     # ---------- 关闭 ----------
 
     def on_close(self):
+        self._stop_meter_thread()
         if self.waterfall_panel is not None:
             self.waterfall_panel.close()
         self.on_disconnect()
