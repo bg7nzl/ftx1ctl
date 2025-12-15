@@ -107,6 +107,7 @@ class RigctlTCPServer(threading.Thread):
 
     def handle_client(self, conn: socket.socket):
         with conn:
+            conn.settimeout(20)
             f = conn.makefile("rwb", buffering=0)
             while not self._stop_event.is_set():
                 try:
@@ -1497,7 +1498,7 @@ class FTX1TkApp:
         try:
             self.cat = FTX1Cat(port=port, baudrate=baud,
                                port2=port2, baudrate2=baud2,
-                               timeout=1.0)
+                               timeout=0.3)
         except Exception as e:
             self.cat = None
             messagebox.showerror(DISPLAY_TEXT["connect_failed"], str(e))

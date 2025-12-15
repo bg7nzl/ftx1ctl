@@ -350,7 +350,7 @@ class FTX1Cat:
 
             self._ser.write(cmd.encode("ascii"))
             # 稍微等一下，避免读空
-            time.sleep(0.02)
+            time.sleep(0.002)
             resp = self._ser.read_until(b";")
             return resp.decode(errors="ignore")
 
@@ -629,11 +629,11 @@ class FTX1Cat:
     def read_all_meters(self) -> Dict[str, Dict[str, int | float | None]]:
         """
         依次读 1..8 meter
-        整个过程在一个锁里，外部不会并发打断。
         """
-        with self._lock:
-            results: Dict[str, Dict[str, int | float | None]] = {}
-            for mid in range(1, 9):
+        
+        results: Dict[str, Dict[str, int | float | None]] = {}
+        for mid in range(1, 9):
+            with self._lock:
                 name = METER_MAP.get(mid, f"METER_{mid}")
                 raw, conv, resp = self.read_meter(mid)  # read_meter 内部也会锁，但 RLock 可重入
                 if raw is not None:
@@ -641,7 +641,7 @@ class FTX1Cat:
                         "raw": raw,
                         "value": conv,
                     }
-            return results
+        return results
 
     # ---------- Manual NOTCH ----------
 
