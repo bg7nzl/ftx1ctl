@@ -212,3 +212,6 @@ ftx1gui.build/
 ftx1gui.dist/
 ftx1gui.onefile-build/
 ftx1gui.exe.sig
+
+official docs/
+docs/Audit_And_Guide*
