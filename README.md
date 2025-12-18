@@ -8,8 +8,10 @@ Additionally, it features a built-in **Hamlib NET rigctl server**, allowing seam
 
 ---
 
-<img width="1333" height="857" alt="2025-12-13 152319" src="https://github.com/user-attachments/assets/ff233183-806b-4d72-9d70-6706687a3bbd" />
+User Manuals: [User Manual](doc/user_manual.md) · [用户手册](doc/user_manual_zh.md) · [ユーザーマニュアル](doc/user_manual_ja.md) · [Руководство пользователя](doc/user_manual_ru.md) · [Benutzerhandbuch](doc/user_manual_de.md) · [Manuel de l'utilisateur](doc/user_manual_fr.md) · [Manual de Usuario](doc/user_manual_es.md)
 
+
+![FTX-1 Console Screenshot](docs/Screenshot%202025-12-18%20121343.jpg)
 
 ---
 
