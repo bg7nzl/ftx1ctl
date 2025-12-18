@@ -8,7 +8,7 @@ Additionally, it features a built-in **Hamlib NET rigctl server**, allowing seam
 
 ---
 
-User Manuals: [User Manual](doc/user_manual.md) · [用户手册](doc/user_manual_zh.md) · [ユーザーマニュアル](doc/user_manual_ja.md) · [Руководство пользователя](doc/user_manual_ru.md) · [Benutzerhandbuch](doc/user_manual_de.md) · [Manuel de l'utilisateur](doc/user_manual_fr.md) · [Manual de Usuario](doc/user_manual_es.md)
+User Manuals: [User Manual](docs/user_manual.md) · [用户手册](docs/user_manual_zh.md) · [ユーザーマニュアル](docs/user_manual_ja.md) · [Руководство пользователя](docs/user_manual_ru.md) · [Benutzerhandbuch](docs/user_manual_de.md) · [Manuel de l'utilisateur](docs/user_manual_fr.md) · [Manual de Usuario](docs/user_manual_es.md)
 
 
 ![FTX-1 Console Screenshot](docs/Screenshot%202025-12-18%20121343.jpg)
